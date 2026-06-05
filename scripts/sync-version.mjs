@@ -16,4 +16,24 @@ const cargoPath = join(root, 'src-tauri/Cargo.toml');
 const cargo = readFileSync(cargoPath, 'utf8');
 writeFileSync(cargoPath, cargo.replace(/^version = ".*"/m, `version = "${version}"`));
 
+// package-lock.json
+const packageLockPath = join(root, 'package-lock.json');
+const packageLock = JSON.parse(readFileSync(packageLockPath, 'utf8'));
+packageLock.version = version;
+if (packageLock.packages?.['']) {
+  packageLock.packages[''].version = version;
+}
+writeFileSync(packageLockPath, JSON.stringify(packageLock, null, 2) + '\n');
+
+// Cargo.lock
+const cargoLockPath = join(root, 'src-tauri/Cargo.lock');
+const cargoLock = readFileSync(cargoLockPath, 'utf8');
+writeFileSync(
+  cargoLockPath,
+  cargoLock.replace(
+    /(\[\[package\]\]\nname = "ai-token-monitor"\nversion = ")[^"]+(")/,
+    `$1${version}$2`,
+  ),
+);
+
 console.log(`Synced version to ${version}`);
