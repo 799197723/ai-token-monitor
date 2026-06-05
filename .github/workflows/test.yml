@@ -1,6 +1,14 @@
 name: CI Tests
 
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
     branches: [main]
     paths-ignore:
