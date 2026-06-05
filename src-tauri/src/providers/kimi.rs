@@ -334,6 +334,7 @@ impl KimiProvider {
             total_messages,
             first_session_date: first_date,
             analytics: None,
+            rate_limits: None,
         }
     }
 

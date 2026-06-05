@@ -79,6 +79,7 @@ impl TokenProvider for GlmProvider {
             total_messages: 0,
             first_session_date: None,
             analytics: None,
+            rate_limits: None,
         };
 
         if let Ok(mut cache) = STATS_CACHE.lock() {

@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useOAuthUsage } from "../hooks/useOAuthUsage";
+import { useTokenStats } from "../hooks/useTokenStats";
+import { useToday } from "../hooks/useToday";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../i18n/I18nContext";
+import type { AllStats, RateLimitWindow } from "../lib/types";
+import { formatCost, formatTokens, getTotalTokens } from "../lib/format";
 
 const REFRESH_COOLDOWN_SECONDS = 30;
 
@@ -29,7 +34,59 @@ function formatResetTime(resetsAt: string, t: (key: string, params?: Record<stri
   return t("usageAlert.resetsIn", { time: parts.join(" ") });
 }
 
+function formatUnixResetTime(resetsAt: number, t: (key: string, params?: Record<string, string>) => string): string {
+  return formatResetTime(new Date(resetsAt * 1000).toISOString(), t);
+}
+
+function formatCodexWindowLabel(
+  window: RateLimitWindow,
+  fallback: string,
+  t: (key: string, params?: Record<string, string>) => string,
+): string {
+  if (window.window_minutes === 300) return t("usageAlert.session");
+  if (window.window_minutes === 10_080) return t("usageAlert.weekly");
+  if (window.window_minutes >= 1_440 && window.window_minutes % 1_440 === 0) {
+    return `${window.window_minutes / 1_440}d`;
+  }
+  if (window.window_minutes >= 60 && window.window_minutes % 60 === 0) {
+    return `${window.window_minutes / 60}h`;
+  }
+  return fallback;
+}
+
 const SEGMENT_COUNT = 10;
+
+interface CodexUsageSummary {
+  tokens: number;
+  cost: number;
+  messages: number;
+  sessions: number;
+}
+
+function emptySummary(): CodexUsageSummary {
+  return { tokens: 0, cost: 0, messages: 0, sessions: 0 };
+}
+
+function summarizeCodexStats(
+  stats: AllStats | null,
+  todayStr: string,
+  days: number,
+): CodexUsageSummary {
+  if (!stats) return emptySummary();
+
+  const todayTime = new Date(`${todayStr}T00:00:00`).getTime();
+  return stats.daily.reduce((summary, day) => {
+    const dayTime = new Date(`${day.date}T00:00:00`).getTime();
+    const diffDays = Math.floor((todayTime - dayTime) / 86_400_000);
+    if (diffDays < 0 || diffDays >= days) return summary;
+
+    summary.tokens += getTotalTokens(day.tokens);
+    summary.cost += day.cost_usd;
+    summary.messages += day.messages;
+    summary.sessions += day.sessions;
+    return summary;
+  }, emptySummary());
+}
 
 function UsageRow({
   label,
@@ -92,13 +149,213 @@ function UsageRow({
   );
 }
 
+function ProviderHeader({
+  label,
+  stale,
+  refreshButton,
+}: {
+  label: string;
+  stale?: boolean;
+  refreshButton?: ReactNode;
+}) {
+  const t = useI18n();
+
+  return (
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 8,
+    }}>
+      <span style={{
+        fontSize: 11,
+        fontWeight: 700,
+        color: "var(--text-primary)",
+      }}>
+        {label}
+      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {stale && (
+          <span style={{
+            fontSize: 9,
+            fontWeight: 600,
+            color: "var(--text-muted)",
+          }}>
+            {t("usageAlert.stale")}
+          </span>
+        )}
+        {refreshButton}
+      </div>
+    </div>
+  );
+}
+
+function CodexUsageRow({
+  label,
+  summary,
+  maxTokens,
+}: {
+  label: string;
+  summary: CodexUsageSummary;
+  maxTokens: number;
+}) {
+  const { prefs } = useSettings();
+  const t = useI18n();
+  const pct = maxTokens > 0 ? Math.min((summary.tokens / maxTokens) * 100, 100) : 0;
+  const filledSegments = Math.round((pct / 100) * SEGMENT_COUNT);
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 4,
+      }}>
+        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-primary)" }}>
+          {label}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+            {formatCost(summary.cost)}
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--accent-purple)" }}>
+            {formatTokens(summary.tokens, prefs.number_format)}
+          </span>
+        </div>
+      </div>
+      <div style={{
+        display: "flex",
+        gap: 3,
+        width: "100%",
+        height: 10,
+        padding: 2,
+        background: "rgba(0,0,0,0.3)",
+        borderRadius: 3,
+        border: "1px solid rgba(255,255,255,0.08)",
+      }}>
+        {Array.from({ length: SEGMENT_COUNT }, (_, i) => (
+          <div
+            key={i}
+            style={{
+              flex: 1,
+              height: "100%",
+              borderRadius: 1,
+              background: i < filledSegments ? "var(--accent-purple)" : "rgba(255,255,255,0.06)",
+              boxShadow: i < filledSegments ? "0 0 4px rgba(88,166,255,0.25)" : "none",
+              transition: "background 0.3s ease",
+            }}
+          />
+        ))}
+      </div>
+      <div style={{
+        marginTop: 3,
+        fontSize: 9,
+        color: "var(--text-muted)",
+        display: "flex",
+        justifyContent: "space-between",
+      }}>
+        <span>{summary.messages.toLocaleString()} {t("analytics.summary.messages")}</span>
+        <span>{summary.sessions.toLocaleString()} {t("analytics.summary.sessions")}</span>
+      </div>
+    </div>
+  );
+}
+
+function CodexRateLimitRows({
+  primary,
+  secondary,
+}: {
+  primary?: RateLimitWindow | null;
+  secondary?: RateLimitWindow | null;
+}) {
+  const t = useI18n();
+
+  return (
+    <>
+      {primary && (
+        <UsageRow
+          label={formatCodexWindowLabel(primary, t("usageAlert.session"), t)}
+          utilization={primary.used_percent}
+          subtitle={formatUnixResetTime(primary.resets_at, t)}
+        />
+      )}
+      {secondary && (
+        <UsageRow
+          label={formatCodexWindowLabel(secondary, t("usageAlert.weekly"), t)}
+          utilization={secondary.used_percent}
+          subtitle={formatUnixResetTime(secondary.resets_at, t)}
+        />
+      )}
+    </>
+  );
+}
+
+function ClaudeTrackingPrompt({
+  enabling,
+  onEnable,
+}: {
+  enabling: boolean;
+  onEnable: () => Promise<void>;
+}) {
+  const t = useI18n();
+
+  return (
+    <div>
+      <ProviderHeader label={t("usageAlert.claude")} />
+      <div style={{
+        fontSize: 10,
+        color: "var(--text-secondary)",
+        marginBottom: 10,
+        lineHeight: 1.4,
+      }}>
+        {t("usageTracking.description")}
+      </div>
+      <button
+        onClick={onEnable}
+        disabled={enabling}
+        style={{
+          width: "100%",
+          padding: "6px 0",
+          fontSize: 11,
+          fontWeight: 600,
+          color: "var(--text-primary)",
+          background: "var(--bg-hover)",
+          border: "1px solid var(--border-secondary)",
+          borderRadius: "var(--radius-md)",
+          cursor: enabling ? "default" : "pointer",
+          opacity: enabling ? 0.6 : 1,
+          transition: "opacity 0.2s ease",
+        }}
+      >
+        {enabling ? t("usageTracking.enabling") : t("usageTracking.enable")}
+      </button>
+    </div>
+  );
+}
+
 export function UsageAlertBar() {
   const { prefs, refreshPrefs } = useSettings();
   const { usage, refreshing, refresh } = useOAuthUsage();
+  const { stats: codexStats } = useTokenStats("codex");
+  const todayStr = useToday();
   const t = useI18n();
   const [enabling, setEnabling] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const cooldownTimerRef = useRef<number | null>(null);
+  const showClaude = prefs.include_claude;
+  const showCodex = prefs.include_codex;
+  const enableClaudeTracking = async () => {
+    setEnabling(true);
+    try {
+      await invoke("enable_usage_tracking");
+      await refreshPrefs();
+    } catch {
+      // silently ignore
+    } finally {
+      setEnabling(false);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -129,7 +386,17 @@ export function UsageAlertBar() {
     await refresh();
   };
 
-  if (!prefs.usage_tracking_enabled) {
+  if (!showClaude && !showCodex) return null;
+
+  const codexToday = summarizeCodexStats(codexStats, todayStr, 1);
+  const codexWeek = summarizeCodexStats(codexStats, todayStr, 7);
+  const codexMaxTokens = Math.max(codexToday.tokens, codexWeek.tokens, 1);
+  const codexRateLimits = codexStats?.rate_limits ?? null;
+  const hasCodexRateLimits = !!(codexRateLimits?.primary || codexRateLimits?.secondary);
+  const hasCodexSummary = codexWeek.tokens > 0 || codexWeek.cost > 0 || codexWeek.messages > 0;
+  const hasCodexData = hasCodexRateLimits || hasCodexSummary;
+
+  if (showClaude && !prefs.usage_tracking_enabled && !showCodex) {
     return (
       <div style={{
         background: "var(--bg-card)",
@@ -153,17 +420,7 @@ export function UsageAlertBar() {
           {t("usageTracking.description")}
         </div>
         <button
-          onClick={async () => {
-            setEnabling(true);
-            try {
-              await invoke("enable_usage_tracking");
-              await refreshPrefs();
-            } catch {
-              // silently ignore
-            } finally {
-              setEnabling(false);
-            }
-          }}
+          onClick={enableClaudeTracking}
           disabled={enabling}
           style={{
             width: "100%",
@@ -185,12 +442,13 @@ export function UsageAlertBar() {
     );
   }
 
-  if (!usage) return null;
+  if (!showClaude && showCodex && !hasCodexData) return null;
 
-  const { five_hour, seven_day, extra_usage, is_stale } = usage;
+  const { five_hour, seven_day, extra_usage, is_stale } = usage ?? {};
 
-  // Don't render if no data at all
-  if (!five_hour && !seven_day && !extra_usage) return null;
+  const hasClaudeData = showClaude && (!!five_hour || !!seven_day || !!extra_usage);
+  const showClaudePrompt = showClaude && !prefs.usage_tracking_enabled;
+  if (!hasClaudeData && !showClaudePrompt && !hasCodexData) return null;
 
   return (
     <div style={{
@@ -212,98 +470,132 @@ export function UsageAlertBar() {
         }}>
           {t("usageAlert.title")}
         </span>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {is_stale && (
-            <span style={{
-              fontSize: 9,
-              fontWeight: 600,
-              color: "var(--text-muted)",
-            }}>
-              {t("usageAlert.stale")}
-            </span>
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing || cooldown > 0}
-            title={
-              refreshing
-                ? t("usageAlert.refreshing")
-                : cooldown > 0
-                ? `${t("usageAlert.refresh")} (${cooldown}s)`
-                : t("usageAlert.refresh")
-            }
-            aria-label={t("usageAlert.refresh")}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 18,
-              height: 18,
-              padding: 0,
-              background: "transparent",
-              border: "none",
-              borderRadius: 3,
-              color: "var(--text-muted)",
-              cursor: refreshing || cooldown > 0 ? "default" : "pointer",
-              opacity: refreshing || cooldown > 0 ? 0.4 : 0.8,
-              transition: "opacity 0.2s ease, color 0.2s ease",
-            }}
-            onMouseEnter={(e) => {
-              if (!refreshing && cooldown === 0) {
-                e.currentTarget.style.color = "var(--text-primary)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = "var(--text-muted)";
-            }}
-          >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{
-                animation: refreshing ? "miniProfileSpin 0.8s linear infinite" : "none",
-              }}
-            >
-              <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-              <path d="M21 3v5h-5" />
-              <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-              <path d="M3 21v-5h5" />
-            </svg>
-          </button>
-        </div>
       </div>
 
-      {/* Session (5h) */}
-      {five_hour && (
-        <UsageRow
-          label={t("usageAlert.session")}
-          utilization={five_hour.utilization}
-          subtitle={formatResetTime(five_hour.resets_at, t)}
+      {hasClaudeData && (
+        <div>
+          <ProviderHeader
+            label={t("usageAlert.claude")}
+            stale={is_stale}
+            refreshButton={(
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing || cooldown > 0}
+                title={
+                  refreshing
+                    ? t("usageAlert.refreshing")
+                    : cooldown > 0
+                    ? `${t("usageAlert.refresh")} (${cooldown}s)`
+                    : t("usageAlert.refresh")
+                }
+                aria-label={t("usageAlert.refresh")}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 18,
+                  height: 18,
+                  padding: 0,
+                  background: "transparent",
+                  border: "none",
+                  borderRadius: 3,
+                  color: "var(--text-muted)",
+                  cursor: refreshing || cooldown > 0 ? "default" : "pointer",
+                  opacity: refreshing || cooldown > 0 ? 0.4 : 0.8,
+                  transition: "opacity 0.2s ease, color 0.2s ease",
+                }}
+                onMouseEnter={(e) => {
+                  if (!refreshing && cooldown === 0) {
+                    e.currentTarget.style.color = "var(--text-primary)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = "var(--text-muted)";
+                }}
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{
+                    animation: refreshing ? "miniProfileSpin 0.8s linear infinite" : "none",
+                  }}
+                >
+                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                  <path d="M21 3v5h-5" />
+                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                  <path d="M3 21v-5h5" />
+                </svg>
+              </button>
+            )}
+          />
+          {five_hour && (
+            <UsageRow
+              label={t("usageAlert.session")}
+              utilization={five_hour.utilization}
+              subtitle={formatResetTime(five_hour.resets_at, t)}
+            />
+          )}
+          {seven_day && (
+            <UsageRow
+              label={t("usageAlert.weekly")}
+              utilization={seven_day.utilization}
+              subtitle={formatResetTime(seven_day.resets_at, t)}
+            />
+          )}
+          {extra_usage && extra_usage.is_enabled && (
+            <UsageRow
+              label={t("usageAlert.extraUsage")}
+              utilization={extra_usage.utilization}
+              subtitle={`$${extra_usage.used_credits.toFixed(2)} / $${extra_usage.monthly_limit.toFixed(2)}`}
+            />
+          )}
+        </div>
+      )}
+
+      {showClaudePrompt && (
+        <ClaudeTrackingPrompt
+          enabling={enabling}
+          onEnable={enableClaudeTracking}
         />
       )}
 
-      {/* Weekly (7d) */}
-      {seven_day && (
-        <UsageRow
-          label={t("usageAlert.weekly")}
-          utilization={seven_day.utilization}
-          subtitle={formatResetTime(seven_day.resets_at, t)}
-        />
+      {(hasClaudeData || showClaudePrompt) && hasCodexData && (
+        <div style={{
+          height: 1,
+          background: "rgba(255,255,255,0.08)",
+          margin: "12px 0",
+        }} />
       )}
 
-      {/* Extra usage */}
-      {extra_usage && extra_usage.is_enabled && (
-        <UsageRow
-          label={t("usageAlert.extraUsage")}
-          utilization={extra_usage.utilization}
-          subtitle={`$${extra_usage.used_credits.toFixed(2)} / $${extra_usage.monthly_limit.toFixed(2)}`}
-        />
+      {hasCodexData && (
+        <div>
+          <ProviderHeader label={t("usageAlert.codex")} />
+          {hasCodexRateLimits ? (
+            <CodexRateLimitRows
+              primary={codexRateLimits?.primary}
+              secondary={codexRateLimits?.secondary}
+            />
+          ) : (
+            <>
+              <CodexUsageRow
+                label={t("usageAlert.today")}
+                summary={codexToday}
+                maxTokens={codexMaxTokens}
+              />
+              <CodexUsageRow
+                label={t("usageAlert.last7Days")}
+                summary={codexWeek}
+                maxTokens={codexMaxTokens}
+              />
+            </>
+          )}
+        </div>
       )}
     </div>
   );

@@ -51,6 +51,22 @@ export interface AnalyticsData {
   activity_breakdown: ActivityCategory[];
 }
 
+export interface RateLimitWindow {
+  used_percent: number;
+  window_minutes: number;
+  resets_at: number;
+}
+
+export interface CodexRateLimits {
+  limit_id?: string | null;
+  limit_name?: string | null;
+  plan_type?: string | null;
+  primary?: RateLimitWindow | null;
+  secondary?: RateLimitWindow | null;
+  rate_limit_reached_type?: string | null;
+  source: "oauth" | "jsonl" | string;
+}
+
 export interface AllStats {
   daily: DailyUsage[];
   model_usage: Record<string, ModelUsage>;
@@ -58,6 +74,7 @@ export interface AllStats {
   total_messages: number;
   first_session_date: string | null;
   analytics?: AnalyticsData;
+  rate_limits?: CodexRateLimits | null;
 }
 
 export type LeaderboardProvider = "claude" | "codex" | "opencode" | "kimi" | "glm";

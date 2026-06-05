@@ -334,6 +334,7 @@ impl ClaudeCodeProvider {
             total_messages,
             first_session_date: first_date,
             analytics: Some(analytics),
+            rate_limits: None,
         }
     }
 

@@ -118,6 +118,7 @@ function mergeStats(statsList: AllStats[]): AllStats {
 
   // Take the first available analytics (currently only Claude provides it)
   const analytics = statsList.find(s => s.analytics)?.analytics;
+  const rate_limits = statsList.find(s => s.rate_limits)?.rate_limits;
 
   return {
     daily,
@@ -126,5 +127,6 @@ function mergeStats(statsList: AllStats[]): AllStats {
     total_messages: totalMessages,
     first_session_date: firstDate,
     analytics,
+    rate_limits,
   };
 }

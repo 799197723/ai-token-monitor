@@ -231,8 +231,12 @@
   "settings.usageTracking": "사용량 추적",
 
   "usageAlert.title": "사용량",
+  "usageAlert.claude": "Claude Code",
+  "usageAlert.codex": "Codex",
   "usageAlert.session": "세션 (5시간)",
   "usageAlert.weekly": "주간",
+  "usageAlert.today": "오늘",
+  "usageAlert.last7Days": "최근 7일",
   "usageAlert.extraUsage": "추가 사용량",
   "usageAlert.stale": "업데이트 중...",
   "usageAlert.resetsIn": "{{time}} 후 리셋",

@@ -225,8 +225,12 @@
   "settings.usageTracking": "Kullanım Takibi",
 
   "usageAlert.title": "Kullanım",
+  "usageAlert.claude": "Claude Code",
+  "usageAlert.codex": "Codex",
   "usageAlert.session": "Oturum (5sa)",
   "usageAlert.weekly": "Haftalık",
+  "usageAlert.today": "Bugün",
+  "usageAlert.last7Days": "Son 7 gün",
   "usageAlert.extraUsage": "Ek Kullanım",
   "usageAlert.stale": "Güncelleniyor...",
   "usageAlert.resetsIn": "{{time}} içinde sıfırlanıyor",

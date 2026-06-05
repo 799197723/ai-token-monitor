@@ -231,8 +231,12 @@
   "settings.usageTracking": "Usage Tracking",
 
   "usageAlert.title": "Usage",
+  "usageAlert.claude": "Claude Code",
+  "usageAlert.codex": "Codex",
   "usageAlert.session": "Session (5h)",
   "usageAlert.weekly": "Weekly",
+  "usageAlert.today": "Today",
+  "usageAlert.last7Days": "Last 7 days",
   "usageAlert.extraUsage": "Extra Usage",
   "usageAlert.stale": "Updating...",
   "usageAlert.resetsIn": "Resets in {{time}}",

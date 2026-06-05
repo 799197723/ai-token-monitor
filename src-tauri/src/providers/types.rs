@@ -62,6 +62,30 @@ pub struct AnalyticsData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitWindow {
+    pub used_percent: f64,
+    pub window_minutes: u32,
+    pub resets_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexRateLimits {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary: Option<RateLimitWindow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secondary: Option<RateLimitWindow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_reached_type: Option<String>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllStats {
     pub daily: Vec<DailyUsage>,
     pub model_usage: HashMap<String, ModelUsage>,
@@ -70,6 +94,8 @@ pub struct AllStats {
     pub first_session_date: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub analytics: Option<AnalyticsData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limits: Option<CodexRateLimits>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

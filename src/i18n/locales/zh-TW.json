@@ -225,8 +225,12 @@
   "settings.usageTracking": "用量追蹤",
 
   "usageAlert.title": "用量",
+  "usageAlert.claude": "Claude Code",
+  "usageAlert.codex": "Codex",
   "usageAlert.session": "工作階段 (5小時)",
   "usageAlert.weekly": "每週",
+  "usageAlert.today": "今天",
+  "usageAlert.last7Days": "最近 7 天",
   "usageAlert.extraUsage": "額外用量",
   "usageAlert.stale": "更新中...",
   "usageAlert.resetsIn": "{{time}}後重置",

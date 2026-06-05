@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime};
 use serde_json::Value;
 
 use super::traits::TokenProvider;
-use super::types::{AllStats, DailyUsage, ModelUsage};
+use super::types::{AllStats, CodexRateLimits, DailyUsage, ModelUsage, RateLimitWindow};
 
 fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
@@ -69,6 +69,11 @@ struct CodexEntry {
     total_tokens: u64,
 }
 
+struct CodexOAuthCredentials {
+    access_token: String,
+    account_id: Option<String>,
+}
+
 // --- Provider ---
 
 pub struct CodexProvider {
@@ -97,7 +102,10 @@ impl CodexProvider {
             all_dirs.insert(0, primary.clone());
         }
 
-        Self { primary_dir: primary, all_dirs }
+        Self {
+            primary_dir: primary,
+            all_dirs,
+        }
     }
 
     fn session_roots(&self) -> Vec<PathBuf> {
@@ -107,6 +115,91 @@ impl CodexProvider {
             roots.push(dir.join("archived_sessions"));
         }
         roots
+    }
+
+    fn auth_file_candidates(&self) -> Vec<PathBuf> {
+        let mut candidates = Vec::new();
+        let mut seen = HashSet::new();
+
+        if let Ok(codex_home) = std::env::var("CODEX_HOME") {
+            let path = PathBuf::from(codex_home).join("auth.json");
+            if seen.insert(path.clone()) {
+                candidates.push(path);
+            }
+        }
+
+        for dir in &self.all_dirs {
+            let path = dir.join("auth.json");
+            if seen.insert(path.clone()) {
+                candidates.push(path);
+            }
+        }
+
+        candidates
+    }
+
+    fn read_oauth_credentials(&self) -> Option<CodexOAuthCredentials> {
+        for path in self.auth_file_candidates() {
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(value) = serde_json::from_str::<Value>(&content) else {
+                continue;
+            };
+            if let Some(credentials) = parse_codex_oauth_credentials(&value) {
+                return Some(credentials);
+            }
+        }
+        None
+    }
+
+    fn fetch_oauth_rate_limits(&self) -> Option<CodexRateLimits> {
+        let credentials = self.read_oauth_credentials()?;
+        tauri::async_runtime::block_on(fetch_codex_oauth_rate_limits(&credentials))
+    }
+
+    fn latest_jsonl_rate_limits(
+        current_meta: &HashMap<PathBuf, (SystemTime, u64)>,
+    ) -> Option<CodexRateLimits> {
+        let mut files: Vec<(&PathBuf, &(SystemTime, u64))> = current_meta.iter().collect();
+        files.sort_by(|(_, (a_mtime, _)), (_, (b_mtime, _))| b_mtime.cmp(a_mtime));
+
+        for (path, _) in files.into_iter().take(30) {
+            if let Some(rate_limits) = Self::parse_rate_limits_from_file(path) {
+                return Some(rate_limits);
+            }
+        }
+
+        None
+    }
+
+    fn parse_rate_limits_from_file(path: &Path) -> Option<CodexRateLimits> {
+        let file = fs::File::open(path).ok()?;
+        let reader = BufReader::with_capacity(64 * 1024, file);
+        let mut latest = None;
+
+        for line in reader.lines().map_while(Result::ok) {
+            let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            let Some(rate_limits) = value
+                .pointer("/payload/rate_limits")
+                .and_then(|v| extract_rate_limits_from_value(v, "jsonl"))
+            else {
+                continue;
+            };
+            latest = Some(rate_limits);
+        }
+
+        latest
+    }
+
+    fn resolve_rate_limits(
+        &self,
+        current_meta: &HashMap<PathBuf, (SystemTime, u64)>,
+    ) -> Option<CodexRateLimits> {
+        self.fetch_oauth_rate_limits()
+            .or_else(|| Self::latest_jsonl_rate_limits(current_meta))
     }
 
     /// Collect mtime/size metadata for all JSONL files.
@@ -364,6 +457,7 @@ impl CodexProvider {
             total_messages,
             first_session_date: first_date,
             analytics: None,
+            rate_limits: None,
         }
     }
 
@@ -374,15 +468,16 @@ impl CodexProvider {
         let entries = if let Ok(cache) = STATS_CACHE.lock() {
             if let Some(ref cached) = *cache {
                 if cached.file_meta == current_meta {
-                    // No files changed — refresh timestamp and return cached
                     drop(cache);
+                    let rate_limits = self.resolve_rate_limits(&current_meta);
                     if let Ok(mut cache) = STATS_CACHE.lock() {
                         if let Some(ref mut cached) = *cache {
                             cached.computed_at = Instant::now();
+                            cached.stats.rate_limits = rate_limits;
                         }
                     }
                     eprintln!(
-                        "[PERF][Codex] No files changed, reusing cache ({:?})",
+                        "[PERF][Codex] No files changed, refreshed rate limits ({:?})",
                         start.elapsed()
                     );
                     if let Ok(cache) = STATS_CACHE.lock() {
@@ -417,7 +512,8 @@ impl CodexProvider {
             return Err("Failed to acquire cache lock".to_string());
         };
 
-        let stats = Self::build_stats(&entries);
+        let mut stats = Self::build_stats(&entries);
+        stats.rate_limits = self.resolve_rate_limits(&current_meta);
 
         if let Ok(mut cache) = STATS_CACHE.lock() {
             *cache = Some(IncrementalCache {
@@ -478,6 +574,7 @@ impl TokenProvider for CodexProvider {
 
     fn is_available(&self) -> bool {
         self.session_roots().iter().any(|root| root.exists())
+            || self.auth_file_candidates().iter().any(|path| path.exists())
     }
 }
 
@@ -556,6 +653,239 @@ fn resolve_entry_date(path_date: Option<&str>, value: &Value) -> String {
     extract_date_from_timestamp(value)
         .or_else(|| path_date.map(ToString::to_string))
         .unwrap_or_else(|| "1970-01-01".to_string())
+}
+
+fn parse_codex_oauth_credentials(value: &Value) -> Option<CodexOAuthCredentials> {
+    if let Some(auth_mode) = string_field(value, "auth_mode") {
+        let auth_mode = auth_mode.to_ascii_lowercase();
+        if !auth_mode.contains("chatgpt") && !auth_mode.contains("agent") {
+            return None;
+        }
+    }
+
+    let access_token = value
+        .pointer("/tokens/access_token")
+        .or_else(|| value.pointer("/tokens/accessToken"))
+        .or_else(|| value.get("access_token"))
+        .or_else(|| value.get("accessToken"))
+        .and_then(value_as_string)?;
+
+    if access_token.starts_with("sk-") {
+        return None;
+    }
+
+    let account_id = value
+        .pointer("/tokens/account_id")
+        .or_else(|| value.pointer("/tokens/accountId"))
+        .or_else(|| value.get("account_id"))
+        .or_else(|| value.get("accountId"))
+        .or_else(|| value.get("chatgpt_account_id"))
+        .or_else(|| value.get("chatgptAccountId"))
+        .and_then(value_as_string);
+
+    Some(CodexOAuthCredentials {
+        access_token,
+        account_id,
+    })
+}
+
+async fn fetch_codex_oauth_rate_limits(
+    credentials: &CodexOAuthCredentials,
+) -> Option<CodexRateLimits> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .ok()?;
+    let endpoints = [
+        "https://chatgpt.com/backend-api/wham/usage",
+        "https://chatgpt.com/backend-api/codex/usage",
+    ];
+
+    for endpoint in endpoints {
+        let mut request = client
+            .get(endpoint)
+            .header(
+                "Authorization",
+                format!("Bearer {}", credentials.access_token),
+            )
+            .header("User-Agent", "codex-cli")
+            .header("Accept", "application/json");
+
+        if let Some(account_id) = &credentials.account_id {
+            request = request.header("ChatGPT-Account-Id", account_id);
+        }
+
+        let Ok(response) = request.send().await else {
+            continue;
+        };
+
+        if !response.status().is_success() {
+            continue;
+        }
+
+        let Ok(value) = response.json::<Value>().await else {
+            continue;
+        };
+
+        if let Some(rate_limits) = extract_rate_limits_from_value(&value, "oauth") {
+            return Some(rate_limits);
+        }
+    }
+
+    None
+}
+
+fn extract_rate_limits_from_value(value: &Value, source: &str) -> Option<CodexRateLimits> {
+    if value.is_null() {
+        return None;
+    }
+
+    for key in ["rate_limit", "rate_limits"] {
+        let Some(candidate) = value.get(key) else {
+            continue;
+        };
+        if let Some(rate_limits) = extract_rate_limits_candidate(candidate, Some(value), source) {
+            return Some(rate_limits);
+        }
+    }
+
+    if let Some(candidates) = value.get("limits").and_then(|v| v.as_array()) {
+        for candidate in candidates {
+            if let Some(rate_limits) = extract_rate_limits_candidate(candidate, Some(value), source)
+            {
+                return Some(rate_limits);
+            }
+        }
+    }
+
+    extract_rate_limits_candidate(value, None, source)
+}
+
+fn extract_rate_limits_candidate(
+    candidate: &Value,
+    outer: Option<&Value>,
+    source: &str,
+) -> Option<CodexRateLimits> {
+    if let Some(candidates) = candidate.as_array() {
+        return candidates
+            .iter()
+            .find_map(|v| extract_rate_limits_candidate(v, outer, source));
+    }
+
+    if candidate.is_null() {
+        return None;
+    }
+
+    let primary = candidate
+        .get("primary")
+        .or_else(|| candidate.get("primary_window"))
+        .and_then(|v| extract_rate_limit_window(v, Some(300)));
+    let secondary = candidate
+        .get("secondary")
+        .or_else(|| candidate.get("secondary_window"))
+        .and_then(|v| extract_rate_limit_window(v, Some(10_080)));
+
+    if primary.is_none() && secondary.is_none() {
+        return None;
+    }
+
+    Some(CodexRateLimits {
+        limit_id: string_field(candidate, "limit_id")
+            .or_else(|| outer.and_then(|v| string_field(v, "limit_id"))),
+        limit_name: string_field(candidate, "limit_name")
+            .or_else(|| outer.and_then(|v| string_field(v, "limit_name"))),
+        plan_type: string_field(candidate, "plan_type")
+            .or_else(|| outer.and_then(|v| string_field(v, "plan_type"))),
+        primary,
+        secondary,
+        rate_limit_reached_type: string_field(candidate, "rate_limit_reached_type")
+            .or_else(|| string_field(candidate, "rateLimitReachedType"))
+            .or_else(|| outer.and_then(|v| string_field(v, "rate_limit_reached_type")))
+            .or_else(|| outer.and_then(|v| string_field(v, "rateLimitReachedType"))),
+        source: source.to_string(),
+    })
+}
+
+fn extract_rate_limit_window(
+    value: &Value,
+    default_window_minutes: Option<u32>,
+) -> Option<RateLimitWindow> {
+    if value.is_null() {
+        return None;
+    }
+
+    let used_percent = extract_used_percent(value)?;
+
+    let resets_at = integer_field(value, "resets_at")
+        .or_else(|| integer_field(value, "resetsAt"))
+        .or_else(|| integer_field(value, "reset_at"))
+        .or_else(|| integer_field(value, "resetAt"))
+        .map(normalize_unix_seconds)?;
+
+    let window_minutes = integer_field(value, "window_minutes")
+        .or_else(|| integer_field(value, "windowDurationMins"))
+        .and_then(|v| u32::try_from(v).ok())
+        .or_else(|| {
+            integer_field(value, "limit_window_seconds")
+                .or_else(|| integer_field(value, "limitWindowSeconds"))
+                .or_else(|| integer_field(value, "window_seconds"))
+                .or_else(|| integer_field(value, "windowSeconds"))
+                .and_then(|v| u32::try_from((v / 60).max(1)).ok())
+        })
+        .or(default_window_minutes)?;
+
+    Some(RateLimitWindow {
+        used_percent,
+        window_minutes,
+        resets_at,
+    })
+}
+
+fn extract_used_percent(value: &Value) -> Option<f64> {
+    if let Some(percent) = number_field(value, "used_percent")
+        .or_else(|| number_field(value, "usedPercent"))
+    {
+        return Some(percent);
+    }
+
+    let utilization = number_field(value, "utilization")?;
+    if (0.0..=1.0).contains(&utilization) {
+        Some(utilization * 100.0)
+    } else {
+        Some(utilization)
+    }
+}
+
+fn normalize_unix_seconds(value: i64) -> i64 {
+    if value > 10_000_000_000 {
+        value / 1000
+    } else {
+        value
+    }
+}
+
+fn string_field(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(value_as_string)
+}
+
+fn value_as_string(value: &Value) -> Option<String> {
+    value.as_str().map(ToString::to_string)
+}
+
+fn number_field(value: &Value, key: &str) -> Option<f64> {
+    value.get(key).and_then(|v| {
+        v.as_f64()
+            .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
+    })
+}
+
+fn integer_field(value: &Value, key: &str) -> Option<i64> {
+    value.get(key).and_then(|v| {
+        v.as_i64()
+            .or_else(|| v.as_u64().and_then(|n| i64::try_from(n).ok()))
+            .or_else(|| v.as_f64().map(|n| n as i64))
+            .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+    })
 }
 
 #[cfg(test)]
@@ -664,6 +994,94 @@ mod tests {
         assert!(result.is_some());
         let (i, o, c, t) = result.unwrap();
         assert_eq!((i, o, c, t), (0, 0, 0, 0));
+    }
+
+    #[test]
+    fn test_extract_oauth_rate_limits() {
+        let value: Value = serde_json::json!({
+            "plan_type": "pro",
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 15,
+                    "reset_at": 1735401600,
+                    "limit_window_seconds": 18000
+                },
+                "secondary_window": {
+                    "used_percent": 5,
+                    "reset_at": 1735920000,
+                    "limit_window_seconds": 604800
+                }
+            }
+        });
+
+        let limits = extract_rate_limits_from_value(&value, "oauth").unwrap();
+        assert_eq!(limits.source, "oauth");
+        assert_eq!(limits.plan_type.as_deref(), Some("pro"));
+        assert_eq!(limits.primary.as_ref().unwrap().used_percent, 15.0);
+        assert_eq!(limits.primary.as_ref().unwrap().window_minutes, 300);
+        assert_eq!(limits.secondary.as_ref().unwrap().window_minutes, 10_080);
+    }
+
+    #[test]
+    fn test_extract_jsonl_rate_limits() {
+        let value: Value = serde_json::json!({
+            "limit_id": "codex",
+            "primary": {
+                "used_percent": 57.0,
+                "window_minutes": 300,
+                "resets_at": 1779974659
+            },
+            "secondary": {
+                "used_percent": 63.0,
+                "window_minutes": 10080,
+                "resets_at": 1780210700
+            },
+            "plan_type": "plus",
+            "rate_limit_reached_type": null
+        });
+
+        let limits = extract_rate_limits_from_value(&value, "jsonl").unwrap();
+        assert_eq!(limits.source, "jsonl");
+        assert_eq!(limits.limit_id.as_deref(), Some("codex"));
+        assert_eq!(limits.plan_type.as_deref(), Some("plus"));
+        assert_eq!(limits.primary.as_ref().unwrap().resets_at, 1779974659);
+        assert_eq!(limits.secondary.as_ref().unwrap().used_percent, 63.0);
+    }
+
+    #[test]
+    fn test_used_percent_is_not_scaled_as_fraction() {
+        let value: Value = serde_json::json!({
+            "used_percent": 1.0,
+            "window_minutes": 300,
+            "resets_at": 1779974659
+        });
+
+        let window = extract_rate_limit_window(&value, None).unwrap();
+        assert_eq!(window.used_percent, 1.0);
+    }
+
+    #[test]
+    fn test_utilization_fraction_is_scaled_to_percent() {
+        let value: Value = serde_json::json!({
+            "utilization": 0.42,
+            "window_minutes": 300,
+            "resets_at": 1779974659
+        });
+
+        let window = extract_rate_limit_window(&value, None).unwrap();
+        assert_eq!(window.used_percent, 42.0);
+    }
+
+    #[test]
+    fn test_parse_codex_oauth_credentials_rejects_api_key_mode() {
+        let value: Value = serde_json::json!({
+            "auth_mode": "apikey",
+            "tokens": {
+                "access_token": "sk-test"
+            }
+        });
+
+        assert!(parse_codex_oauth_credentials(&value).is_none());
     }
 
     #[test]
