@@ -123,6 +123,8 @@ pub struct UserPreferences {
     pub include_kimi: bool,
     #[serde(default)]
     pub include_glm: bool,
+    #[serde(default)]
+    pub include_hermes: bool,
     #[serde(default = "default_codex_dirs")]
     pub codex_dirs: Vec<String>,
     #[serde(default)]
@@ -276,6 +278,7 @@ impl Default for UserPreferences {
             include_opencode: false,
             include_kimi: false,
             include_glm: false,
+            include_hermes: false,
             codex_dirs: default_codex_dirs(),
             salary_enabled: false,
             monthly_salary: None,

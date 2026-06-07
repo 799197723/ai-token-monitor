@@ -30,6 +30,7 @@ export function LeaderboardUploader() {
   const { stats: opencodeStats } = useTokenStats("opencode");
   const { stats: kimiStats } = useTokenStats("kimi");
   const { stats: glmStats } = useTokenStats("glm");
+  const { stats: hermesStats } = useTokenStats("hermes");
 
   const claude = useSnapshotUploader({
     stats: prefs.include_claude ? claudeStats : null,
@@ -61,6 +62,12 @@ export function LeaderboardUploader() {
     optedIn,
     provider: "glm",
   });
+  const hermes = useSnapshotUploader({
+    stats: prefs.include_hermes ? hermesStats : null,
+    user,
+    optedIn,
+    provider: "hermes",
+  });
 
   const runners = useMemo<Partial<Record<LeaderboardProvider, BackfillRunner>>>(
     () => ({
@@ -69,6 +76,7 @@ export function LeaderboardUploader() {
       opencode: prefs.include_opencode && opencode.ready ? opencode.manualBackfill : undefined,
       kimi: prefs.include_kimi && kimi.ready ? kimi.manualBackfill : undefined,
       glm: prefs.include_glm && glm.ready ? glm.manualBackfill : undefined,
+      hermes: prefs.include_hermes && hermes.ready ? hermes.manualBackfill : undefined,
     }),
     [
       prefs.include_claude,
@@ -76,16 +84,19 @@ export function LeaderboardUploader() {
       prefs.include_opencode,
       prefs.include_kimi,
       prefs.include_glm,
+      prefs.include_hermes,
       claude.ready,
       codex.ready,
       opencode.ready,
       kimi.ready,
       glm.ready,
+      hermes.ready,
       claude.manualBackfill,
       codex.manualBackfill,
       opencode.manualBackfill,
       kimi.manualBackfill,
       glm.manualBackfill,
+      hermes.manualBackfill,
     ],
   );
 

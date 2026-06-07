@@ -18,6 +18,8 @@ struct PricingConfig {
     kimi: Option<ProviderConfig>,
     #[serde(default)]
     glm: Option<ProviderConfig>,
+    #[serde(default)]
+    hermes: Option<ProviderConfig>,
 }
 
 #[derive(Deserialize)]
@@ -75,6 +77,12 @@ pub struct KimiPricing {
 
 #[allow(dead_code)]
 pub struct GlmPricing {
+    pub input: f64,
+    pub output: f64,
+    pub cache_read: f64,
+}
+
+pub struct HermesPricing {
     pub input: f64,
     pub output: f64,
     pub cache_read: f64,
@@ -168,6 +176,19 @@ pub fn get_glm_pricing(model: &str) -> GlmPricing {
     GlmPricing { input: 0.50, output: 1.00, cache_read: 0.0 }
 }
 
+pub fn get_hermes_pricing(model: &str) -> HermesPricing {
+    let cfg = config();
+    if let Some(ref hermes) = cfg.hermes {
+        let entry = find_pricing(hermes, model);
+        return HermesPricing {
+            input: entry.input,
+            output: entry.output,
+            cache_read: entry.cache_read,
+        };
+    }
+    HermesPricing { input: 0.50, output: 2.00, cache_read: 0.125 }
+}
+
 pub fn get_opencode_pricing(model: &str) -> OpenCodePricing {
     let cfg = config();
     // Use dedicated opencode pricing if available, otherwise try to match
@@ -225,6 +246,8 @@ pub struct PricingTable {
     pub kimi: Vec<PricingRow>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub glm: Vec<PricingRow>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hermes: Vec<PricingRow>,
 }
 
 fn format_price(val: f64) -> String {
@@ -269,6 +292,7 @@ pub fn get_pricing_table() -> PricingTable {
         opencode: cfg.opencode.as_ref().map(|oc| deduplicated_rows(oc, false)).unwrap_or_default(),
         kimi: cfg.kimi.as_ref().map(|k| deduplicated_rows(k, false)).unwrap_or_default(),
         glm: cfg.glm.as_ref().map(|g| deduplicated_rows(g, false)).unwrap_or_default(),
+        hermes: cfg.hermes.as_ref().map(|h| deduplicated_rows(h, false)).unwrap_or_default(),
     }
 }
 

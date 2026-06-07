@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use crate::providers::claude_code::ClaudeCodeProvider;
 use crate::providers::codex::CodexProvider;
 use crate::providers::glm::GlmProvider;
+use crate::providers::hermes::HermesProvider;
 use crate::providers::kimi::KimiProvider;
 use crate::providers::opencode::OpenCodeProvider;
 use crate::providers::pricing;
@@ -138,6 +139,29 @@ pub async fn get_glm_stats(app: tauri::AppHandle) -> Result<AllStats, String> {
 #[tauri::command]
 pub fn is_glm_available() -> bool {
     GlmProvider::new().is_available()
+}
+
+#[tauri::command]
+pub async fn get_hermes_stats(app: tauri::AppHandle) -> Result<AllStats, String> {
+    let result = tauri::async_runtime::spawn_blocking(|| {
+        let provider = HermesProvider::new();
+        if !provider.is_available() {
+            return Err("Hermes stats not available".to_string());
+        }
+        provider.fetch_stats()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if result.is_ok() {
+        crate::update_tray_title(&app);
+    }
+    result
+}
+
+#[tauri::command]
+pub fn is_hermes_available() -> bool {
+    HermesProvider::new().is_available()
 }
 
 #[tauri::command]

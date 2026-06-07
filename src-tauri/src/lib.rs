@@ -298,7 +298,15 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
             0.0
         };
 
-        let today_cost = claude_cost + codex_cost + opencode_cost + kimi_cost + glm_cost;
+        let hermes_cost = if prefs.include_hermes {
+            providers::hermes::get_cached_stats()
+                .and_then(|s| s.daily.iter().find(|d| d.date == today).map(|d| d.cost_usd))
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+
+        let today_cost = claude_cost + codex_cost + opencode_cost + kimi_cost + glm_cost + hermes_cost;
         let cost_str = if today_cost >= 1.0 {
             format!("${:.0}", today_cost)
         } else {
@@ -364,6 +372,12 @@ fn get_all_watch_dirs() -> Vec<PathBuf> {
     let zhipu_sessions = home.join(".zhipu").join("sessions");
     if zhipu_sessions.exists() {
         dirs.push(zhipu_sessions);
+    }
+
+    // Add Hermes session directory
+    let hermes_sessions = home.join("AppData").join("Local").join("hermes");
+    if hermes_sessions.exists() {
+        dirs.push(hermes_sessions);
     }
 
     dirs
@@ -435,6 +449,7 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                     providers::opencode::invalidate_stats_cache();
                     providers::kimi::invalidate_stats_cache();
                     providers::glm::invalidate_stats_cache();
+                    providers::hermes::invalidate_stats_cache();
                     let _ = app_handle.emit("stats-updated", ());
                     // Re-parse in background so the tray reflects new data even when the
                     // popup is closed (get_all_stats is only called by the frontend).
@@ -454,6 +469,9 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                         }
                         if prefs.include_glm {
                             let _ = providers::glm::GlmProvider::new().fetch_stats();
+                        }
+                        if prefs.include_hermes {
+                            let _ = providers::hermes::HermesProvider::new().fetch_stats();
                         }
                         update_tray_title(&app_for_refresh);
                     });
@@ -477,6 +495,7 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                         providers::opencode::invalidate_stats_cache();
                         providers::kimi::invalidate_stats_cache();
                         providers::glm::invalidate_stats_cache();
+                        providers::hermes::invalidate_stats_cache();
                         let _ = app_handle.emit("stats-updated", ());
                     }
                     update_tray_title(&app_handle);
@@ -826,6 +845,8 @@ pub fn run() {
             commands::is_kimi_available,
             commands::get_glm_stats,
             commands::is_glm_available,
+            commands::get_hermes_stats,
+            commands::is_hermes_available,
             commands::get_preferences,
             commands::set_preferences,
             commands::get_stable_device_id,

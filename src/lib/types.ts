@@ -77,7 +77,7 @@ export interface AllStats {
   rate_limits?: CodexRateLimits | null;
 }
 
-export type LeaderboardProvider = "claude" | "codex" | "opencode" | "kimi" | "glm";
+export type LeaderboardProvider = "claude" | "codex" | "opencode" | "kimi" | "glm" | "hermes";
 
 export interface UserPreferences {
   number_format: "compact" | "full";
@@ -89,6 +89,7 @@ export interface UserPreferences {
   include_opencode: boolean;
   include_kimi: boolean;
   include_glm: boolean;
+  include_hermes: boolean;
   theme: "github" | "purple" | "ocean" | "sunset";
   color_mode: "system" | "light" | "dark";
   language: "en" | "ko" | "ja" | "zh-CN" | "zh-TW" | "fr" | "es" | "de" | "tr" | "it";

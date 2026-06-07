@@ -1,6 +1,7 @@
 pub mod claude_code;
 pub mod codex;
 pub mod glm;
+pub mod hermes;
 pub mod kimi;
 pub mod opencode;
 pub mod pricing;

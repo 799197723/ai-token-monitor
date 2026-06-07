@@ -99,5 +99,17 @@
       { "match": "glm-4",      "label": "GLM-4",       "input": 0.50, "output": 1.00, "cache_read": 0.0, "cache_write": 0.0 },
       { "match": "glm",        "label": "GLM-4",       "input": 0.50, "output": 1.00, "cache_read": 0.0, "cache_write": 0.0 }
     ]
+  },
+  "hermes": {
+    "default": "deepseek-v4-flash",
+    "models": [
+      { "match": "deepseek-v4-pro",    "label": "DeepSeek V4 Pro",     "input": 2.00, "output": 8.00, "cache_read": 0.50, "cache_write": 0.0 },
+      { "match": "deepseek-v4-flash",  "label": "DeepSeek V4 Flash",   "input": 0.50, "output": 2.00, "cache_read": 0.125, "cache_write": 0.0 },
+      { "match": "deepseek-chat",      "label": "DeepSeek V3",         "input": 0.27, "output": 1.10, "cache_read": 0.07, "cache_write": 0.0 },
+      { "match": "deepseek-reasoner",  "label": "DeepSeek R1",         "input": 0.55, "output": 2.19, "cache_read": 0.14, "cache_write": 0.0 },
+      { "match": "deepseek",           "label": "DeepSeek V4 Flash",   "input": 0.50, "output": 2.00, "cache_read": 0.125, "cache_write": 0.0 },
+      { "match": "openrouter",         "label": "OpenRouter",          "input": 0.50, "output": 2.00, "cache_read": 0.125, "cache_write": 0.0 },
+      { "match": "gpt",                "label": "GPT",                 "input": 2.50, "output": 10.0, "cache_read": 0.0, "cache_write": 0.0 }
+    ]
   }
 }
