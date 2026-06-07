@@ -847,6 +847,7 @@ pub fn run() {
             commands::is_glm_available,
             commands::get_hermes_stats,
             commands::is_hermes_available,
+            commands::get_hermes_debug_info,
             commands::get_preferences,
             commands::set_preferences,
             commands::get_stable_device_id,

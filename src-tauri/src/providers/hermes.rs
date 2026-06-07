@@ -30,7 +30,7 @@ pub fn get_cached_stats() -> Option<AllStats> {
 }
 
 pub struct HermesProvider {
-    db_path: PathBuf,
+    pub db_path: PathBuf,
 }
 
 impl HermesProvider {

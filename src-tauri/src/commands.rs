@@ -161,7 +161,23 @@ pub async fn get_hermes_stats(app: tauri::AppHandle) -> Result<AllStats, String>
 
 #[tauri::command]
 pub fn is_hermes_available() -> bool {
-    HermesProvider::new().is_available()
+    let provider = HermesProvider::new();
+    provider.is_available()
+}
+
+#[tauri::command]
+pub fn get_hermes_debug_info() -> serde_json::Value {
+    let provider = HermesProvider::new();
+    let path = provider.db_path.display().to_string();
+    let exists = provider.db_path.exists();
+    let home = dirs::home_dir().map(|p| p.display().to_string()).unwrap_or_default();
+    let hermes_home = std::env::var("HERMES_HOME").unwrap_or_default();
+    serde_json::json!({
+        "path": path,
+        "exists": exists,
+        "home_dir": home,
+        "hermes_home_env": hermes_home,
+    })
 }
 
 #[tauri::command]
