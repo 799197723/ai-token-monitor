@@ -35,10 +35,32 @@ pub struct HermesProvider {
 
 impl HermesProvider {
     pub fn new() -> Self {
-        // Default Hermes state.db path
-        let home = dirs::home_dir().unwrap_or_default();
-        let db_path = home.join("AppData").join("Local").join("hermes").join("state.db");
+        let db_path = Self::find_state_db()
+            .unwrap_or_else(|| {
+                let home = dirs::home_dir().unwrap_or_default();
+                home.join("AppData").join("Local").join("hermes").join("state.db")
+            });
         Self { db_path }
+    }
+
+    /// Try to find Hermes state.db in multiple possible locations
+    fn find_state_db() -> Option<PathBuf> {
+        // 1. Try HERMES_HOME env var
+        if let Ok(val) = std::env::var("HERMES_HOME") {
+            let p = PathBuf::from(val).join("state.db");
+            if p.exists() { return Some(p); }
+        }
+        let home = dirs::home_dir()?;
+
+        // 2. Windows: ~/AppData/Local/hermes/state.db
+        let win_path = home.join("AppData").join("Local").join("hermes").join("state.db");
+        if win_path.exists() { return Some(win_path); }
+
+        // 3. Linux/Mac: ~/.hermes/state.db
+        let unix_path = home.join(".hermes").join("state.db");
+        if unix_path.exists() { return Some(unix_path); }
+
+        None
     }
 
     pub fn with_path(path: PathBuf) -> Self {
