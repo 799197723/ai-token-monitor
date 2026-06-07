@@ -16,6 +16,7 @@
   "sources.opencode": "OpenCode",
   "sources.kimi": "Kimi",
   "sources.glm": "GLM",
+  "sources.hermes": "Hermes",
   "sources.summary.count": "{{total}} içinden {{active}} aktif",
   "sources.open": "Kaynak menüsünü aç",
 

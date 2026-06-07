@@ -16,6 +16,7 @@
   "sources.opencode": "OpenCode",
   "sources.kimi": "Kimi",
   "sources.glm": "GLM",
+  "sources.hermes": "Hermes",
   "sources.summary.count": "{{active}} sur {{total}} actives",
   "sources.open": "Ouvrir le menu des sources",
 
