@@ -103,7 +103,7 @@ impl TokenProvider for HermesProvider {
                 "SELECT model, started_at, ended_at, message_count, tool_call_count,
                         input_tokens, output_tokens, cache_read_tokens
                  FROM sessions
-                 WHERE ended_at IS NOT NULL
+                 WHERE (input_tokens > 0 OR output_tokens > 0)
                  ORDER BY started_at ASC",
             )
             .map_err(|e| format!("Failed to prepare query: {e}"))?;
