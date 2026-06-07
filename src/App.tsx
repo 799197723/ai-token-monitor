@@ -2,12 +2,8 @@ import { useState, useMemo, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useCombinedStats } from "./hooks/useCombinedStats";
 import { useToday } from "./hooks/useToday";
-import { useUnreadChat } from "./hooks/useUnreadChat";
-import { useChatNotification } from "./hooks/useChatNotification";
 import { getTotalTokens } from "./lib/format";
 import { SettingsProvider, useSettings } from "./contexts/SettingsContext";
-import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import { MiniProfileProvider } from "./contexts/MiniProfileContext";
 import { I18nProvider, useI18n } from "./i18n/I18nContext";
 import { PopoverShell } from "./components/PopoverShell";
 import { Header } from "./components/Header";
@@ -19,16 +15,10 @@ import { Heatmap } from "./components/Heatmap";
 import { ModelBreakdown } from "./components/ModelBreakdown";
 import { PeriodTotals } from "./components/PeriodTotals";
 import { CacheEfficiency } from "./components/CacheEfficiency";
-import { Leaderboard } from "./components/Leaderboard";
-import { LeaderboardUploader } from "./components/LeaderboardUploader";
-import { ChatRoom } from "./components/ChatRoom";
 import { ActivityGraph } from "./components/ActivityGraph";
-import { SupportBanner } from "./components/SupportBanner";
 import { SourceSelector } from "./components/SourceSelector";
 import { SalaryComparator } from "./components/SalaryComparator";
 import { UsageAlertBar } from "./components/UsageAlertBar";
-import { MiniProfile } from "./components/MiniProfile";
-import { OAuthFallbackModal } from "./components/OAuthFallbackModal";
 import { AnalyticsSubTabs } from "./components/AnalyticsSubTabs";
 import type { AnalyticsSubTab } from "./components/AnalyticsSubTabs";
 import { ProjectBreakdown } from "./components/ProjectBreakdown";
@@ -37,7 +27,6 @@ import { ShellCommands } from "./components/ShellCommands";
 import { AnalyticsSummary } from "./components/AnalyticsSummary";
 import { ActivityBreakdown } from "./components/ActivityBreakdown";
 import { useUpdater } from "./hooks/useUpdater";
-import { setChatChannelUser, activateChatChannel } from "./realtime/chatChannel";
 
 function AnalyticsEmptyState({ message }: { message: string }) {
   return (
@@ -58,13 +47,10 @@ function AnalyticsEmptyState({ message }: { message: string }) {
 function AppContent() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Only hide the window if no overlay/modal has already handled this Escape press
       if (e.key === "Escape" && !e.defaultPrevented) {
         invoke("hide_window").catch(() => {});
       }
     };
-    // Use capture=false so modal keydown handlers (which run first) can call
-    // e.preventDefault() to stop this from also closing the window.
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
@@ -78,35 +64,10 @@ function AppContent() {
     includeHermes: prefs.include_hermes,
   });
   const t = useI18n();
-  const { user, profile } = useAuth();
   const updater = useUpdater();
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [analyticsSubTab, setAnalyticsSubTab] = useState<AnalyticsSubTab>("usage");
-  const [chatActivated, setChatActivated] = useState(false);
   const todayStr = useToday();
-  const { unreadCount } = useUnreadChat(activeTab === "chat", user?.id ?? null);
-
-  useChatNotification({
-    isChatActive: activeTab === "chat",
-    currentNickname: profile?.nickname ?? null,
-    currentUserId: user?.id ?? null,
-  });
-
-  useEffect(() => {
-    if (activeTab === "chat") setChatActivated(true);
-  }, [activeTab]);
-
-  // Drive the unified chat realtime channel. Activation is gated only by
-  // login state; RLS on chat_messages/chat_reactions enforces the actual
-  // access policy on the server. This replaces three independent Realtime
-  // channels that each reconnected on every visibilitychange, fixing IO
-  // Budget exhaustion on Supabase Free/Nano.
-  useEffect(() => {
-    setChatChannelUser(user?.id ?? null);
-  }, [user?.id]);
-  useEffect(() => {
-    activateChatChannel(!!user);
-  }, [user]);
 
   const { today, weekAvg } = useMemo(() => {
     if (!stats) return { today: null, weekAvg: 0 };
@@ -184,9 +145,8 @@ function AppContent() {
     <PopoverShell>
       <Header stats={stats} updater={updater} />
       <SourceSelector />
-      <TabBar activeTab={activeTab} onChange={setActiveTab} chatBadge={unreadCount} />
+      <TabBar activeTab={activeTab} onChange={setActiveTab} />
 
-      {/* Keep mounted tabs alive to avoid remount/recalculation on switch */}
       <div style={{ display: activeTab === "overview" ? "contents" : "none" }}>
         <TodaySummary today={today} weekAvg={weekAvg} />
         <UsageAlertBar />
@@ -231,28 +191,6 @@ function AppContent() {
             : <AnalyticsEmptyState message={t("analytics.empty.tools")} />
         )}
       </div>
-
-      {/* Leaderboard lazy-loads (network requests), keep conditional */}
-      {activeTab === "leaderboard" && (
-        <Leaderboard />
-      )}
-
-      {/* Chat: always mounted but hidden via CSS; defers fetch until first visit */}
-      <div style={{
-        flex: 1,
-        minHeight: 0,
-        display: activeTab === "chat" ? "flex" : "none",
-        flexDirection: "column" as const,
-      }}>
-        <ChatRoom activated={chatActivated} visible={activeTab === "chat"} />
-      </div>
-
-      <SupportBanner />
-      <MiniProfile localDaily={stats.daily} currentUserId={user?.id ?? null} />
-      {/* Headless: keeps all enabled providers' snapshot history in sync
-          regardless of whether the Leaderboard tab is open. */}
-      <LeaderboardUploader />
-      <OAuthFallbackModal />
     </PopoverShell>
   );
 }
@@ -270,11 +208,7 @@ function App() {
   return (
     <SettingsProvider>
       <I18nBridge>
-        <AuthProvider>
-          <MiniProfileProvider>
-            <AppContent />
-          </MiniProfileProvider>
-        </AuthProvider>
+        <AppContent />
       </I18nBridge>
     </SettingsProvider>
   );
