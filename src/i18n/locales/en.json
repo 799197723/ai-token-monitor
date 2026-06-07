@@ -26,7 +26,7 @@
   "today.cost": "Cost",
   "today.messages": "Messages",
   "today.sessions": "Sessions",
-  "today.costTooltipTitle": "Estimated API cost ($/MTok)",
+  "today.costTooltipTitle": "Estimated API cost (¥/MTok)",
   "today.costTooltipNote": "Subscription plan users pay a flat rate, not per-token.",
   "today.costTooltipModel": "Model",
   "today.costTooltipIn": "In",

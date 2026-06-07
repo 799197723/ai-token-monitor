@@ -8,10 +8,13 @@ export function formatTokens(n: number, format: "compact" | "full" = "compact"):
   return n.toString();
 }
 
+const CNY_RATE = 7.2;
+
 export function formatCost(usd: number): string {
-  if (usd >= 100) return `$${usd.toFixed(0)}`;
-  if (usd >= 1) return `$${usd.toFixed(2)}`;
-  return `$${usd.toFixed(4)}`;
+  const cny = usd * CNY_RATE;
+  if (cny >= 100) return `¥${cny.toFixed(0)}`;
+  if (cny >= 1) return `¥${cny.toFixed(2)}`;
+  return `¥${cny.toFixed(4)}`;
 }
 
 export function formatDate(dateStr: string, locale?: string): string {

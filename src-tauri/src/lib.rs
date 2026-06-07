@@ -308,9 +308,9 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
 
         let today_cost = claude_cost + codex_cost + opencode_cost + kimi_cost + glm_cost + hermes_cost;
         let cost_str = if today_cost >= 1.0 {
-            format!("${:.0}", today_cost)
+            format!("¥{:.0}", today_cost * 7.2)
         } else {
-            format!("${:.2}", today_cost)
+            format!("¥{:.2}", today_cost * 7.2)
         };
         let tooltip_str = format!("AI Token Monitor - Today: {}", cost_str);
         (cost_str, tooltip_str)
